@@ -6,13 +6,16 @@ const TuyaSpecificClusterDevice = require('../../lib/TuyaSpecificClusterDevice')
 
 Cluster.addCluster(TuyaSpecificCluster);
 
+// Add alternates some TS0601 variants use
 const dataPoints = {
-  humidity: 3,
-  temperature: 5,
-  temperature_unit: 9,
-  battery_state: 14,
-  battery: 15
-}
+  humidity: [3, 2, 102],       // main, alt, alt2
+  temperature: [5, 1, 101],    // main, alt, alt2
+  temperature_unit: [9],
+  battery_state: [14],
+  battery: [15, 103],
+};
+
+const isDp = (dp, list) => (Array.isArray(list) ? list.includes(dp) : dp === list);
 
 const dataTypes = {
   raw: 0, // [ bytes ]
@@ -69,34 +72,51 @@ class soilsensor extends TuyaSpecificClusterDevice {
     });
   }
 
-  async updateData(data) {
-    const dp = data.dp;
-    const value = getDataValue(data);
+async updateData(data) {
+  const dp = data.dp;
+  const value = getDataValue(data);
 
-    switch (dp) {
-      case dataPoints.humidity:
-        this.log("Humidity: " + value);
-
-        this.setCapabilityValue('measure_humidity', value).catch(this.error);
-        break;
-      case dataPoints.temperature:
-        this.log("Temparature: " + value);
-
-        this.setCapabilityValue('measure_temperature', value).catch(this.error);
-        break;
-      case dataPoints.battery:
-        this.log("Battery: " + value);
-
-        this.setCapabilityValue('measure_battery', value).catch(this.error);
-        break;
-      case dataPoints.battery_state:
-        this.log("Battery state: " + value);
-        var batAlarm = value === 0 ? true : false;
-
-        this.setCapabilityValue('alarm_battery', batAlarm).catch(this.error);
-        break;
-    }
+  if (isDp(dp, dataPoints.humidity)) {
+    // Most TS0601 soil sensors send RH in tenths (e.g., 568 -> 56.8 %)
+    const rh = value > 1000 ? value / 10 : value;
+    this.log("Humidity:", value, "→", rh);
+    this.setCapabilityValue('measure_humidity', rh).catch(this.error);
+    return;
   }
+
+  if (isDp(dp, dataPoints.temperature)) {
+    // Temperature is reported in deci-degrees C (e.g., 214 -> 21.4 °C)
+    const t = value / 10;
+    this.log("Temperature:", value, "→", t);
+    this.setCapabilityValue('measure_temperature', t).catch(this.error);
+    return;
+  }
+
+  if (isDp(dp, dataPoints.battery)) {
+    // Battery usually 0–100; clamp defensively
+    const bat = Math.max(0, Math.min(100, value));
+    this.log("Battery:", value, "→", bat);
+    this.setCapabilityValue('measure_battery', bat).catch(this.error);
+    return;
+  }
+
+  if (isDp(dp, dataPoints.battery_state)) {
+    // 2=good, 1=warning, 0=low → alarm true when low
+    const alarm = value === 0;
+    this.log("Battery state:", value, "→ alarm:", alarm);
+    this.setCapabilityValue('alarm_battery', alarm).catch(this.error);
+    return;
+  }
+
+  // Optional: temperature_unit (DP 9) or any other unknown DPs
+  if (isDp(dp, dataPoints.temperature_unit)) {
+    this.log("Temperature unit (ignored):", value);
+    return;
+  }
+
+  // Helpful while validating: see what else the device sends
+  this.log('Unhandled Tuya DP', dp, 'raw value', value, data);
+}
 
   onDeleted(){
 		this.log("Soil sensor removed");
