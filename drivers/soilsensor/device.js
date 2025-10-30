@@ -116,6 +116,8 @@ async updateData(data) {
 
   // Helpful while validating: see what else the device sends
   this.log('Unhandled Tuya DP', dp, 'raw value', value, data);
+  this.log(`📡 DP: ${data.dp}, Raw:`, data.data, '→ Decoded:', getDataValue(data));
+
 }
 
   onDeleted(){
