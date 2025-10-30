@@ -1,35 +1,42 @@
 'use strict';
 
-const Homey = require('homey');
 const { ZigBeeDevice } = require('homey-zigbeedriver');
-const { debug, CLUSTER } = require('zigbee-clusters');
+const { CLUSTER } = require('zigbee-clusters');
 
 class switch_3_gang extends ZigBeeDevice {
 
-    async onNodeInit({zclNode}) {
+  async onNodeInit({ zclNode }) {
+    const { subDeviceId } = this.getData();
+    const endpoint = subDeviceId === 'secondSwitch' ? 2 :
+                     subDeviceId === 'thirdSwitch' ? 3 : 1;
 
-        this.printNode();
+    this.log(`Device initialized. subDeviceId: ${subDeviceId}, endpoint: ${endpoint}`);
 
-        const { subDeviceId } = this.getData();
-        this.log("Device data: ", subDeviceId);
+    // Register capability listener for the ON/OFF cluster
+    this.registerCapability('onoff', CLUSTER.ON_OFF, { endpoint });
 
-        this.registerCapability('onoff', CLUSTER.ON_OFF, {
-            endpoint: subDeviceId === 'secondSwitch' ? 2 : subDeviceId === 'thirdSwitch' ? 3 : 1,
-        });
+    // Register report listener to update tile state when device is toggled physically
+    zclNode.endpoints[endpoint].clusters.onOff.on('attr.onOff', value => {
+      this.log(`Received onOff report for endpoint ${endpoint}: ${value}`);
+      this.setCapabilityValue('onoff', value).catch(this.error);
+    });
 
-        if (!this.isSubDevice()) {
-            await zclNode.endpoints[1].clusters.basic.readAttributes(['manufacturerName', 'zclVersion', 'appVersion', 'modelId', 'powerSource', 'attributeReportingStatus'])
-            .catch(err => {
-                this.error('Error when reading device attributes ', err);
-            });
-        }
-
+    // Optional: read device info only for main (non-sub) device
+    if (!this.isSubDevice()) {
+      try {
+        await zclNode.endpoints[1].clusters.basic.readAttributes([
+          'manufacturerName', 'zclVersion', 'appVersion', 'modelId', 'powerSource', 'attributeReportingStatus'
+        ]);
+      } catch (err) {
+        this.error('Error reading basic attributes: ', err);
+      }
     }
+  }
 
-    onDeleted(){
-		this.log("3 Gang Switch, channel ", subDeviceId, " removed")
-	}
-
+  onDeleted() {
+    const { subDeviceId } = this.getData();
+    this.log(`3 Gang Switch, channel ${subDeviceId || 'main'} removed`);
+  }
 }
 
 module.exports = switch_3_gang;
